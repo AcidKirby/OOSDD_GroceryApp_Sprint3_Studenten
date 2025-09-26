@@ -6,6 +6,7 @@ using Grocery.Core.Interfaces.Services;
 using Grocery.Core.Models;
 using System.Collections.ObjectModel;
 using System.Text.Json;
+using System.Diagnostics;
 
 namespace Grocery.App.ViewModels
 {
@@ -15,7 +16,10 @@ namespace Grocery.App.ViewModels
         private readonly IGroceryListItemsService _groceryListItemsService;
         private readonly IProductService _productService;
         private readonly IFileSaverService _fileSaverService;
-        
+
+        // ✅ Interne lijst van alle producten
+        private List<Product> _allProducts = new();
+
         public ObservableCollection<GroceryListItem> MyGroceryListItems { get; set; } = [];
         public ObservableCollection<Product> AvailableProducts { get; set; } = [];
 
@@ -29,7 +33,7 @@ namespace Grocery.App.ViewModels
             _groceryListItemsService = groceryListItemsService;
             _productService = productService;
             _fileSaverService = fileSaverService;
-            Load(groceryList.Id);
+           
         }
 
         private void Load(int id)
@@ -42,9 +46,17 @@ namespace Grocery.App.ViewModels
         private void GetAvailableProducts()
         {
             AvailableProducts.Clear();
-            foreach (Product p in _productService.GetAll())
-                if (MyGroceryListItems.FirstOrDefault(g => g.ProductId == p.Id) == null  && p.Stock > 0)
+
+            _allProducts = _productService.GetAll().ToList();
+
+            foreach (Product p in _allProducts)
+            {
+                bool zitAlOpLijst = MyGroceryListItems.Any(g => g.ProductId == p.Id);
+                if (!zitAlOpLijst && p.Stock > 0)
+                {
                     AvailableProducts.Add(p);
+                }
+            }
         }
 
         partial void OnGroceryListChanged(GroceryList value)
@@ -62,12 +74,15 @@ namespace Grocery.App.ViewModels
         public void AddProduct(Product product)
         {
             if (product == null) return;
-            GroceryListItem item = new(0, GroceryList.Id, product.Id, 1);
-            _groceryListItemsService.Add(item);
-            product.Stock--;
-            _productService.Update(product);
-            AvailableProducts.Remove(product);
-            OnGroceryListChanged(GroceryList);
+
+            // Voeg alleen toe als het product nog niet op de lijst staat
+            if (MyGroceryListItems.Any(g => g.ProductId == product.Id)) return;
+
+            GroceryListItem nieuwItem = new(0, GroceryList.Id, product.Id, 1);
+            _groceryListItemsService.Add(nieuwItem);
+
+            product.Stock--; // optioneel
+            OnGroceryListChanged(GroceryList); 
         }
 
         [RelayCommand]
@@ -85,6 +100,24 @@ namespace Grocery.App.ViewModels
                 await Toast.Make($"Opslaan mislukt: {ex.Message}").Show(cancellationToken);
             }
         }
+        [RelayCommand]
+        public void Search(string zoekterm)
+        {
 
+            IEnumerable<Product> filtered = _allProducts
+                .Where(p => MyGroceryListItems.Count(g => g.ProductId == p.Id) < p.Stock);
+
+            if (!string.IsNullOrWhiteSpace(zoekterm))
+            {
+                filtered = filtered.Where(p =>
+                    p.Name.Contains(zoekterm, StringComparison.OrdinalIgnoreCase));
+            }
+
+            AvailableProducts.Clear();
+            foreach (var p in filtered)
+            {
+                AvailableProducts.Add(p);
+            }
+        }
     }
 }
